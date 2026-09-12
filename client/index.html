@@ -2,115 +2,173 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Collaborative Drawing Canvas</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>CanvasFlow Studio — Real-Time Collaborative Canvas</title>
     <link rel="stylesheet" href="style.css">
 </head>
-<body> 
-    <div class="app-container">
-        <header class="header">
-            <div class="header-left">
-                <h1>🎨 Collaborative Canvas</h1>
-                <div id="connection-status" class="status disconnected">Connecting...</div> 
-            </div>
-            <div class="header-right">
-                <div class="user-info">
-                    <span id="user-color" class="user-color"></span>
-                    <span id="user-id">Connecting...</span>
+<body>
+    <div class="app-layout">
+        <!-- Top Navigation Header -->
+        <header class="top-nav">
+            <div class="nav-left">
+                <div class="brand">
+                    <span class="brand-icon">✏️</span>
+                    <span class="brand-title">CanvasFlow <span class="brand-sub">Studio</span></span>
                 </div>
-                <div class="performance">
-                    <span id="fps-counter">0 FPS</span>
+
+                <div class="room-pill">
+                    <span class="room-label">Room:</span>
+                    <span id="room-name-display" class="room-id">connecting...</span>
+                    <button id="copy-room-btn" class="btn-copy" title="Copy room invitation link">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                        </svg>
+                        <span>Share</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="nav-right">
+                <div id="connection-status-badge" class="status-pill connecting">
+                    <span class="pulse-indicator connecting"></span>Connecting...
+                </div>
+
+                <div id="current-user-badge" class="current-user-badge">
+                    <span class="user-avatar-dot"></span>
+                    <span class="user-name">Joining...</span>
                 </div>
             </div>
         </header>
 
-        <div class="main-content">
-            <aside class="sidebar">
-                <div class="tools-section">
-                    <h3>Tools</h3>
-                    <div class="tools-grid">
-                        <button class="tool-btn active" data-tool="brush" title="Brush (B)">
-                            🖌️ Brush
+        <!-- Main Workspace -->
+        <div class="workspace-body">
+            <!-- Left Tool Panel -->
+            <aside class="tool-sidebar">
+                <!-- Tool Selection -->
+                <div class="panel-section">
+                    <span class="section-title">Drawing Tools</span>
+                    <div class="tool-buttons">
+                        <button class="tool-btn active" data-tool="brush" title="Brush Tool (B)">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08"></path>
+                                <path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z"></path>
+                            </svg>
+                            <span>Brush</span>
                         </button>
-                        <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
-                            🧹 Eraser
+                        <button class="tool-btn" data-tool="eraser" title="Eraser Tool (E)">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"></path>
+                                <path d="M22 21H7"></path>
+                                <path d="m5 11 9 9"></path>
+                            </svg>
+                            <span>Eraser</span>
                         </button>
                     </div>
                 </div>
 
-                <div class="color-section">
-                    <h3>Color</h3>
-                    <input type="color" id="color-picker" value="#000000">
-                    <div class="color-presets">
-                        <button class="color-preset" style="background: #000000" data-color="#000000"></button>
-                        <button class="color-preset" style="background: #FF0000" data-color="#FF0000"></button>
-                        <button class="color-preset" style="background: #00FF00" data-color="#00FF00"></button>
-                        <button class="color-preset" style="background: #0000FF" data-color="#0000FF"></button>
-                        <button class="color-preset" style="background: #FFFF00" data-color="#FFFF00"></button>
-                        <button class="color-preset" style="background: #FF00FF" data-color="#FF00FF"></button>
-                        <button class="color-preset" style="background: #00FFFF" data-color="#00FFFF"></button>
-                        <button class="color-preset" style="background: #FFFFFF; border: 1px solid #ddd" data-color="#FFFFFF"></button>
+                <!-- Color Selection -->
+                <div class="panel-section">
+                    <span class="section-title">Color Palette</span>
+                    <div class="palette-swatches">
+                        <button class="color-swatch" style="background: #0f172a" data-color="#0f172a"></button>
+                        <button class="color-swatch active" style="background: #3b82f6" data-color="#3b82f6"></button>
+                        <button class="color-swatch" style="background: #ef4444" data-color="#ef4444"></button>
+                        <button class="color-swatch" style="background: #10b981" data-color="#10b981"></button>
+                        <button class="color-swatch" style="background: #f59e0b" data-color="#f59e0b"></button>
+                        <button class="color-swatch" style="background: #8b5cf6" data-color="#8b5cf6"></button>
+                        <button class="color-swatch" style="background: #ec4899" data-color="#ec4899"></button>
+                        <button class="color-swatch" style="background: #06b6d4" data-color="#06b6d4"></button>
+                    </div>
+                    <div class="custom-color-row">
+                        <label for="color-picker" class="custom-color-label">Custom Color:</label>
+                        <input type="color" id="color-picker" value="#3b82f6" title="Choose custom color">
                     </div>
                 </div>
 
-                <div class="size-section">
-                    <h3>Brush Size: <span id="brush-size-value">3</span>px</h3>
-                    <input type="range" id="brush-size" min="1" max="50" value="3">
+                <!-- Stroke Width Slider -->
+                <div class="panel-section">
+                    <div class="section-title-row">
+                        <span class="section-title">Stroke Width</span>
+                        <span id="stroke-width-val" class="value-label">4px</span>
+                    </div>
+                    <div class="slider-container">
+                        <input type="range" id="stroke-width-slider" min="1" max="50" value="4">
+                        <div class="preview-box">
+                            <div id="brush-preview-dot" class="preview-dot"></div>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="actions-section">
-                    <h3>Actions</h3>
-                    <button id="undo-btn" class="action-btn" disabled title="Undo (Ctrl+Z)">
-                        ↶ Undo
+                <!-- Global Undo / Redo / Clear Actions -->
+                <div class="panel-section">
+                    <span class="section-title">Global History</span>
+                    <div class="history-buttons">
+                        <button id="undo-btn" class="action-btn" disabled title="Global Undo (Ctrl+Z)">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 7v6h6"></path>
+                                <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"></path>
+                            </svg>
+                            <span>Undo</span>
+                            <span class="action-badge">0</span>
+                        </button>
+                        <button id="redo-btn" class="action-btn" disabled title="Global Redo (Ctrl+Y)">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 7v6h-6"></path>
+                                <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"></path>
+                            </svg>
+                            <span>Redo</span>
+                            <span class="action-badge">0</span>
+                        </button>
+                    </div>
+                    <button id="clear-btn" class="btn-secondary danger" title="Clear Canvas for Everyone">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M3 6h18"></path>
+                            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                        </svg>
+                        <span>Clear All</span>
                     </button>
-                    <button id="redo-btn" class="action-btn" disabled title="Redo (Ctrl+Y)">
-                        ↷ Redo
-                    </button>
-                    <button id="clear-btn" class="action-btn danger">
-                        🗑️ Clear All
+                    <button id="export-btn" class="btn-secondary" title="Export as PNG image">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        <span>Export PNG</span>
                     </button>
                 </div>
 
-                <div class="users-section">
-                    <h3>Online Users (<span id="users-count">0</span>)</h3>
-                    <div id="users-list" class="users-list">
-                        <!-- Users will be populated here -->
+                <!-- Online Collaborators -->
+                <div class="panel-section collaborators-section">
+                    <div class="section-title-row">
+                        <span class="section-title">Collaborators</span>
+                        <span id="online-count-badge" class="count-badge">0</span>
+                    </div>
+                    <div id="online-users-list" class="collaborators-list">
+                        <!-- Populated dynamically -->
                     </div>
                 </div>
             </aside>
 
-            <main class="canvas-container">
-                <div class="canvas-wrapper">
+            <!-- Main Canvas Viewport -->
+            <main class="canvas-viewport">
+                <div class="canvas-stage">
                     <canvas id="canvas"></canvas>
                     <canvas id="cursors-canvas"></canvas>
-                </div>
-                <div class="canvas-info">
-                    <p>💡 Tips: Use mouse/touch to draw. Undo/Redo works globally across all users!</p>
-                    <p>⌨️ Shortcuts: Ctrl+Z (Undo), Ctrl+Y (Redo)</p>
                 </div>
             </main>
         </div>
     </div>
 
+    <!-- Toast Notification Overlay -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Socket.IO Client -->
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- Application Modules -->
     <script src="canvas.js"></script>
     <script src="websocket.js"></script>
     <script src="main.js"></script>
-    
-    <script>
-
-        document.querySelectorAll('.color-preset').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const color = e.target.dataset.color;
-                document.getElementById('color-picker').value = color;
-                document.getElementById('color-picker').dispatchEvent(new Event('input'));
-            });
-        });
-    </script>
 </body>
-
 </html>
-
-
-
-
-

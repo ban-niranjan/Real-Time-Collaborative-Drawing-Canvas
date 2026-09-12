@@ -1,22 +1,57 @@
-console.log('✅ main.js loaded');
+/**
+ * Main Application Orchestrator
+ * Coordinates UI, CanvasEngine, SocketClient, and Overlay Cursor Animation.
+ */
 
-class CollaborativeCanvas {
+class CollaborativeApp {
     constructor() {
-        this.canvas = null;
-        this.wsManager = null; 
-        this.drawingHistory = [];
-        this.redoStack = [];
-        this.remoteCursors = new Map(); 
-        this.users = [];
-         
-        this.fps = 0;
-        this.lastFrameTime = Date.now();
-        
+        this.canvasEngine = null;
+        this.socketClient = null;
+
+        // Overlay cursor state
+        this.overlayCanvas = null;
+        this.overlayCtx = null;
+        this.remoteCursors = new Map(); // userId -> { x, y, userName, color, lastSeen }
+        this.cursorAnimationId = null;
+
+        // State counts
+        this.undoCount = 0;
+        this.redoCount = 0;
+
+        // Room ID
+        this.roomId = this.resolveRoomId();
+
         this.init();
     }
 
+    /**
+     * Parse room ID from URL or generate a clean room code
+     */
+    resolveRoomId() {
+        const urlParams = new URLSearchParams(window.location.search);
+        let room = urlParams.get('room');
+
+        if (!room) {
+            const pathParts = window.location.pathname.split('/');
+            const roomIdx = pathParts.indexOf('room');
+            if (roomIdx !== -1 && pathParts[roomIdx + 1]) {
+                room = pathParts[roomIdx + 1];
+            }
+        }
+
+        if (!room) {
+            // Generate friendly default room code
+            const randomCode = Math.random().toString(36).substring(2, 8);
+            room = `studio-${randomCode}`;
+            const newUrl = `${window.location.pathname}?room=${room}`;
+            window.history.replaceState({ room }, '', newUrl);
+        }
+
+        return room.toLowerCase();
+    }
+
     init() {
-        if (document.readyState === 'loading') { 
+        if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => this.setup());
         } else {
             this.setup();
@@ -24,337 +59,514 @@ class CollaborativeCanvas {
     }
 
     setup() {
-        const canvasElement = document.getElementById('canvas');
-        if (!canvasElement) {
-            console.error('Canvas element not found!');
+        const mainCanvas = document.getElementById('canvas');
+        const overlayCanvas = document.getElementById('cursors-canvas');
+
+        if (!mainCanvas || !overlayCanvas) {
+            console.error('Required canvas elements missing from DOM');
             return;
         }
 
-        this.canvas = new CanvasDrawing(canvasElement);
-        this.wsManager = new WebSocketManager();
-        
-        this.setupWebSocketCallbacks();
-        this.setupCanvasCallbacks();
-        this.setupControls();
-        this.setupCursorsCanvas();
-        this.startPerformanceMonitoring();
-        
-        this.wsManager.connect();
+        this.overlayCanvas = overlayCanvas;
+        this.overlayCtx = overlayCanvas.getContext('2d');
+
+        // Initialize Canvas Engine
+        this.canvasEngine = new CanvasEngine(mainCanvas);
+
+        // Initialize Socket Client
+        this.socketClient = new SocketClient();
+
+        this.setupOverlayCanvas();
+        this.setupCanvasListeners();
+        this.setupSocketListeners();
+        this.setupUIControls();
+        this.setupKeyboardShortcuts();
+
+        // Connect to server
+        this.socketClient.connect(this.roomId);
+
+        // Start overlay cursor render loop
+        this.startCursorRenderLoop();
+
+        // Display room title
+        const roomNameEl = document.getElementById('room-name-display');
+        if (roomNameEl) {
+            roomNameEl.textContent = this.roomId;
+        }
     }
 
-    setupWebSocketCallbacks() {
-        this.wsManager.onInit = (data) => {
-            console.log('Initialized:', data.clientId);
-            
-            const userIdEl = document.getElementById('user-id');
-            const userColorEl = document.getElementById('user-color');
-            
-            if (userIdEl) userIdEl.textContent = `You: User ${data.clientId}`;
-            if (userColorEl) userColorEl.style.backgroundColor = data.color;
-            
-            if (data.history && data.history.length > 0) {
-                this.drawingHistory = data.history;
-                this.canvas.redrawFromHistory(data.history);
+    /**
+     * Overlay cursor canvas calibration
+     */
+    setupOverlayCanvas() {
+        const resizeOverlay = () => {
+            const rect = this.overlayCanvas.parentElement.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            this.overlayCanvas.width = Math.round(rect.width * dpr);
+            this.overlayCanvas.height = Math.round(rect.height * dpr);
+            this.overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        };
+
+        resizeOverlay();
+        window.addEventListener('resize', resizeOverlay);
+    }
+
+    /**
+     * Canvas Engine -> Socket Events
+     */
+    setupCanvasListeners() {
+        // Stream stroke chunks in real time
+        this.canvasEngine.onStrokeChunk = (chunk) => {
+            this.socketClient.sendStrokeChunk(chunk);
+        };
+
+        // Commit stroke when user lifts pointer
+        this.canvasEngine.onStrokeEnd = (strokeData) => {
+            this.socketClient.sendStrokeCommit(strokeData);
+        };
+
+        // Stream cursor coordinates (normalized 0.0 to 1.0)
+        this.canvasEngine.onCursorMove = (normX, normY) => {
+            this.socketClient.sendCursor(normX, normY);
+        };
+    }
+
+    /**
+     * Socket -> UI & Canvas Events
+     */
+    setupSocketListeners() {
+        const s = this.socketClient;
+
+        s.onConnectionChange = (status) => {
+            this.updateConnectionStatus(status);
+        };
+
+        s.onInit = (data) => {
+            // Update current user info
+            const myBadge = document.getElementById('current-user-badge');
+            if (myBadge && data.user) {
+                myBadge.innerHTML = `
+                    <span class="user-avatar-dot" style="background-color: ${data.user.color}"></span>
+                    <span class="user-name">${data.user.name} (You)</span>
+                `;
             }
-            
-            this.updateUsersList(data.users);
-            this.updateUndoRedoButtons();
-        };
 
-        this.wsManager.onDraw = (data) => {
-            this.drawingHistory.push(data);
-            this.canvas.queueRemoteDraw(data);
-            this.updateUndoRedoButtons();
-        };
-
-        this.wsManager.onUndo = (data) => {
-            console.log('Received undo event from server');
-            if (this.drawingHistory.length > 0) {
-                const undoneOp = this.drawingHistory.pop();
-                this.redoStack.push(undoneOp);
-                this.canvas.redrawFromHistory(this.drawingHistory);
-                this.updateUndoRedoButtons();
+            // Sync drawing history
+            if (data.history && data.history.operations) {
+                this.canvasEngine.setHistory(data.history.operations);
+                this.undoCount = data.history.undoCount || 0;
+                this.redoCount = data.history.redoCount || 0;
+                this.updateUndoRedoUI();
             }
+
+            this.updateOnlineUsers(data.users || []);
+            this.showToast(`Connected to room: ${data.roomId}`, 'info');
         };
 
-        this.wsManager.onRedo = (data) => {
-            console.log('Received redo event from server');
-            if (data.operation) {
-                this.drawingHistory.push(data.operation);
-                this.canvas.redrawFromHistory(this.drawingHistory);
-                
-                const index = this.redoStack.findIndex(op => op.opId === data.operation.opId);
-                if (index !== -1) {
-                    this.redoStack.splice(index, 1);
-                }
-                
-                this.updateUndoRedoButtons();
-            }
+        s.onUserJoined = (data) => {
+            this.updateOnlineUsers(data.users);
+            this.showToast(`${data.user.name} joined the room`, 'info', data.user.color);
         };
 
-        this.wsManager.onClear = () => {
-            this.drawingHistory = [];
-            this.redoStack = [];
-            this.canvas.clear();
-            this.updateUndoRedoButtons();
-        };
-
-        this.wsManager.onCursor = (data) => {
-            this.updateRemoteCursor(data);
-        };
-
-        this.wsManager.onUserJoined = (data) => {
-            this.updateUsersList(data.users);
-            this.showNotification(`${data.user.username} joined`, data.user.color);
-        };
-
-        this.wsManager.onUserLeft = (data) => {
-            this.updateUsersList(data.users);
+        s.onUserLeft = (data) => {
+            this.updateOnlineUsers(data.users);
             this.remoteCursors.delete(data.userId);
-            this.showNotification(`User ${data.userId} left`, '#999');
         };
 
-        this.wsManager.onConnectionChange = (connected) => {
-            const statusEl = document.getElementById('connection-status');
-            if (statusEl) {
-                statusEl.textContent = connected ? 'Connected' : 'Disconnected';
-                statusEl.className = connected ? 'status connected' : 'status disconnected';
+        // Real-time remote stroke rendering
+        s.onStrokeChunk = (chunk) => {
+            this.canvasEngine.renderRemoteChunk(chunk);
+        };
+
+        // Stroke committed by server
+        s.onStrokeCommitted = (data) => {
+            this.canvasEngine.applyCommittedStroke(data.operation);
+            if (data.counts) {
+                this.undoCount = data.counts.undoCount;
+                this.redoCount = data.counts.redoCount;
+                this.updateUndoRedoUI();
             }
         };
-    }
 
-    setupCanvasCallbacks() {
-        this.canvas.onDraw = (drawData) => {
-            this.wsManager.sendDraw(drawData);
+        // Global Undo
+        s.onActionUndone = (data) => {
+            this.canvasEngine.removeOperation(data.operationId);
+            this.undoCount = data.undoCount;
+            this.redoCount = data.redoCount;
+            this.updateUndoRedoUI();
         };
 
-        this.canvas.onCursorMove = (x, y) => {
-            this.wsManager.sendCursor(x, y);
+        // Global Redo
+        s.onActionRedone = (data) => {
+            this.canvasEngine.applyCommittedStroke(data.operation);
+            this.undoCount = data.undoCount;
+            this.redoCount = data.redoCount;
+            this.updateUndoRedoUI();
+        };
+
+        // Canvas Cleared
+        s.onActionCleared = (data) => {
+            this.canvasEngine.clearCanvas();
+            this.undoCount = 0;
+            this.redoCount = 0;
+            this.updateUndoRedoUI();
+            this.showToast(`Canvas was cleared by ${data.userName}`, 'warning');
+        };
+
+        // Remote Cursor Position
+        s.onCursorUpdate = (cursor) => {
+            this.remoteCursors.set(cursor.userId, {
+                x: cursor.x,
+                y: cursor.y,
+                userName: cursor.userName,
+                color: cursor.color,
+                lastSeen: Date.now()
+            });
+        };
+
+        s.onCursorRemove = ({ userId }) => {
+            this.remoteCursors.delete(userId);
         };
     }
 
-    setupControls() {
-        document.querySelectorAll('.tool-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-                e.target.classList.add('active');
-                this.canvas.setTool(e.target.dataset.tool);
+    /**
+     * UI Control Bindings
+     */
+    setupUIControls() {
+        // Tool buttons
+        const toolBtns = document.querySelectorAll('.tool-btn');
+        toolBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                toolBtns.forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const tool = btn.dataset.tool;
+                this.canvasEngine.setTool(tool);
+                this.updateCursorStyle(tool);
             });
         });
 
+        // Color Presets
+        const colorPresets = document.querySelectorAll('.color-swatch');
         const colorPicker = document.getElementById('color-picker');
+
+        colorPresets.forEach(swatch => {
+            swatch.addEventListener('click', () => {
+                colorPresets.forEach(s => s.classList.remove('active'));
+                swatch.classList.add('active');
+                const color = swatch.dataset.color;
+                this.canvasEngine.setColor(color);
+                if (colorPicker) colorPicker.value = color;
+                this.updateBrushPreview(color, this.canvasEngine.width);
+            });
+        });
+
         if (colorPicker) {
             colorPicker.addEventListener('input', (e) => {
-                this.canvas.setColor(e.target.value);
+                colorPresets.forEach(s => s.classList.remove('active'));
+                this.canvasEngine.setColor(e.target.value);
+                this.updateBrushPreview(e.target.value, this.canvasEngine.width);
             });
         }
 
-        const brushSize = document.getElementById('brush-size');
-        const brushSizeValue = document.getElementById('brush-size-value');
-        if (brushSize && brushSizeValue) {
-            brushSize.addEventListener('input', (e) => {
-                const size = parseInt(e.target.value);
-                this.canvas.setWidth(size);
-                brushSizeValue.textContent = size;
+        // Stroke Width Slider
+        const widthSlider = document.getElementById('stroke-width-slider');
+        const widthValDisplay = document.getElementById('stroke-width-val');
+
+        if (widthSlider) {
+            widthSlider.addEventListener('input', (e) => {
+                const w = parseInt(e.target.value, 10);
+                this.canvasEngine.setWidth(w);
+                if (widthValDisplay) widthValDisplay.textContent = `${w}px`;
+                this.updateBrushPreview(this.canvasEngine.color, w);
             });
         }
 
+        // Undo Button
         const undoBtn = document.getElementById('undo-btn');
         if (undoBtn) {
             undoBtn.addEventListener('click', () => {
-                console.log('Undo clicked, history length:', this.drawingHistory.length);
-                if (this.drawingHistory.length > 0) {
-                    const undoneOp = this.drawingHistory.pop();
-                    this.redoStack.push(undoneOp);
-                    this.canvas.redrawFromHistory(this.drawingHistory);
-                    this.updateUndoRedoButtons();
-                    
-                    // Send to server AFTER local update
-                    this.wsManager.sendUndo();
-                } else {
-                    console.log('Nothing to undo');
-                }
+                this.socketClient.sendUndo();
             });
         }
 
+        // Redo Button
         const redoBtn = document.getElementById('redo-btn');
         if (redoBtn) {
             redoBtn.addEventListener('click', () => {
-                console.log('Redo clicked, redo stack length:', this.redoStack.length);
-                if (this.redoStack.length > 0) {
-                    const redoOp = this.redoStack.pop();
-                    this.drawingHistory.push(redoOp);
-                    this.canvas.redrawFromHistory(this.drawingHistory);
-                    this.updateUndoRedoButtons();
-                    
-                    // Send to server AFTER local update
-                    this.wsManager.sendRedo(redoOp);
-                } else {
-                    console.log('Nothing to redo');
-                }
+                this.socketClient.sendRedo();
             });
         }
 
+        // Clear Canvas Button
         const clearBtn = document.getElementById('clear-btn');
         if (clearBtn) {
             clearBtn.addEventListener('click', () => {
-                if (confirm('Clear canvas for everyone?')) {
-                    this.wsManager.sendClear();
-                    this.drawingHistory = [];
-                    this.redoStack = [];
-                    this.canvas.clear();
-                    this.updateUndoRedoButtons();
+                if (window.confirm('Clear the canvas for everyone in this room?')) {
+                    this.socketClient.sendClear();
                 }
             });
         }
 
-        document.addEventListener('keydown', (e) => {
+        // Copy Room Link Button
+        const copyLinkBtn = document.getElementById('copy-room-btn');
+        if (copyLinkBtn) {
+            copyLinkBtn.addEventListener('click', () => {
+                const url = window.location.href;
+                navigator.clipboard.writeText(url)
+                    .then(() => this.showToast('Room link copied to clipboard!', 'success'))
+                    .catch(() => {
+                        prompt('Copy this room link:', url);
+                    });
+            });
+        }
+
+        // Export Canvas PNG
+        const exportBtn = document.getElementById('export-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => {
+                this.exportCanvasImage();
+            });
+        }
+
+        // Initial preview update
+        this.updateBrushPreview(this.canvasEngine.color, this.canvasEngine.width);
+        this.updateUndoRedoUI();
+    }
+
+    setupKeyboardShortcuts() {
+        window.addEventListener('keydown', (e) => {
+            // Avoid triggering shortcuts when typing into an input
+            if (e.target.tagName === 'INPUT') return;
+
             if (e.ctrlKey || e.metaKey) {
-                if (e.key === 'z' && !e.shiftKey) {
+                if (e.key.toLowerCase() === 'z' && !e.shiftKey) {
                     e.preventDefault();
-                    if (undoBtn && !undoBtn.disabled) {
-                        undoBtn.click();
-                    }
-                } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+                    if (this.undoCount > 0) this.socketClient.sendUndo();
+                } else if ((e.key.toLowerCase() === 'z' && e.shiftKey) || e.key.toLowerCase() === 'y') {
                     e.preventDefault();
-                    if (redoBtn && !redoBtn.disabled) {
-                        redoBtn.click();
-                    }
+                    if (this.redoCount > 0) this.socketClient.sendRedo();
+                }
+            } else {
+                if (e.key.toLowerCase() === 'b') {
+                    const brushBtn = document.querySelector('.tool-btn[data-tool="brush"]');
+                    if (brushBtn) brushBtn.click();
+                } else if (e.key.toLowerCase() === 'e') {
+                    const eraserBtn = document.querySelector('.tool-btn[data-tool="eraser"]');
+                    if (eraserBtn) eraserBtn.click();
+                } else if (e.key === '[') {
+                    const w = Math.max(1, this.canvasEngine.width - 2);
+                    this.setStrokeWidth(w);
+                } else if (e.key === ']') {
+                    const w = Math.min(50, this.canvasEngine.width + 2);
+                    this.setStrokeWidth(w);
                 }
             }
         });
-
-        document.querySelectorAll('.color-preset').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const color = e.target.dataset.color;
-                if (color && colorPicker) {
-                    colorPicker.value = color;
-                    colorPicker.dispatchEvent(new Event('input'));
-                }
-            });
-        });
     }
 
-    updateUndoRedoButtons() {
+    setStrokeWidth(w) {
+        this.canvasEngine.setWidth(w);
+        const slider = document.getElementById('stroke-width-slider');
+        const display = document.getElementById('stroke-width-val');
+        if (slider) slider.value = w;
+        if (display) display.textContent = `${w}px`;
+        this.updateBrushPreview(this.canvasEngine.color, w);
+    }
+
+    updateCursorStyle(tool) {
+        const canvas = document.getElementById('canvas');
+        if (!canvas) return;
+        if (tool === 'eraser') {
+            canvas.style.cursor = 'cell';
+        } else {
+            canvas.style.cursor = 'crosshair';
+        }
+    }
+
+    updateBrushPreview(color, width) {
+        const dot = document.getElementById('brush-preview-dot');
+        if (dot) {
+            dot.style.backgroundColor = this.canvasEngine.tool === 'eraser' ? '#94a3b8' : color;
+            dot.style.width = `${Math.max(4, Math.min(32, width))}px`;
+            dot.style.height = `${Math.max(4, Math.min(32, width))}px`;
+        }
+    }
+
+    updateUndoRedoUI() {
         const undoBtn = document.getElementById('undo-btn');
         const redoBtn = document.getElementById('redo-btn');
-        
+
         if (undoBtn) {
-            undoBtn.disabled = this.drawingHistory.length === 0;
-            console.log('Undo button:', this.drawingHistory.length === 0 ? 'disabled' : 'enabled', '(history:', this.drawingHistory.length, ')');
+            undoBtn.disabled = this.undoCount === 0;
+            const badge = undoBtn.querySelector('.action-badge');
+            if (badge) badge.textContent = this.undoCount;
         }
+
         if (redoBtn) {
-            redoBtn.disabled = this.redoStack.length === 0;
-            console.log('Redo button:', this.redoStack.length === 0 ? 'disabled' : 'enabled', '(redo stack:', this.redoStack.length, ')');
+            redoBtn.disabled = this.redoCount === 0;
+            const badge = redoBtn.querySelector('.action-badge');
+            if (badge) badge.textContent = this.redoCount;
         }
     }
 
-    updateUsersList(users) {
-        this.users = users;
-        const usersList = document.getElementById('users-list');
-        const usersCount = document.getElementById('users-count');
-        
-        if (usersList) {
-            usersList.innerHTML = users.map(user => `
-                <div class="user-item">
-                    <span class="user-color" style="background-color: ${user.color}"></span>
-                    <span>${user.username}</span>
+    updateConnectionStatus(status) {
+        const badge = document.getElementById('connection-status-badge');
+        if (!badge) return;
+
+        badge.className = `status-pill ${status}`;
+        if (status === 'connected') {
+            badge.innerHTML = `<span class="pulse-indicator online"></span>Connected`;
+        } else if (status === 'reconnecting') {
+            badge.innerHTML = `<span class="pulse-indicator connecting"></span>Reconnecting...`;
+        } else {
+            badge.innerHTML = `<span class="pulse-indicator offline"></span>Offline`;
+        }
+    }
+
+    updateOnlineUsers(users) {
+        const container = document.getElementById('online-users-list');
+        const countBadge = document.getElementById('online-count-badge');
+
+        if (countBadge) {
+            countBadge.textContent = users.length;
+        }
+
+        if (!container) return;
+
+        const currentSocketId = this.socketClient.socket ? this.socketClient.socket.id : null;
+
+        container.innerHTML = users.map(user => {
+            const isMe = user.id === currentSocketId;
+            const initials = user.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
+
+            return `
+                <div class="collaborator-item ${isMe ? 'is-self' : ''}" title="${user.name}">
+                    <div class="user-avatar" style="border-color: ${user.color}">
+                        <span style="color: ${user.color}">${initials}</span>
+                    </div>
+                    <div class="user-details">
+                        <span class="user-name">${user.name} ${isMe ? '<small>(You)</small>' : ''}</span>
+                        <span class="user-status-dot" style="background-color: ${user.color}"></span>
+                    </div>
                 </div>
-            `).join('');
-        }
-        
-        if (usersCount) usersCount.textContent = users.length;
+            `;
+        }).join('');
     }
 
-    setupCursorsCanvas() {
-        const cursorsCanvas = document.getElementById('cursors-canvas');
-        const mainCanvas = document.getElementById('canvas');
-        
-        if (cursorsCanvas && mainCanvas) {
-            cursorsCanvas.width = mainCanvas.width;
-            cursorsCanvas.height = mainCanvas.height;
-            this.animateCursors();
-        }
-    }
+    /**
+     * Overlay Remote Cursor Loop (RequestAnimationFrame)
+     */
+    startCursorRenderLoop() {
+        const render = () => {
+            const rect = this.overlayCanvas.getBoundingClientRect();
+            this.overlayCtx.clearRect(0, 0, rect.width, rect.height);
 
-    updateRemoteCursor(data) {
-        this.remoteCursors.set(data.userId, {
-            x: data.x,
-            y: data.y,
-            color: data.color,
-            lastUpdate: Date.now()
-        });
-    }
-
-    animateCursors() {
-        const cursorsCanvas = document.getElementById('cursors-canvas');
-        if (!cursorsCanvas) return;
-        
-        const ctx = cursorsCanvas.getContext('2d');
-        if (!ctx) return;
-        
-        const animate = () => {
-            ctx.clearRect(0, 0, cursorsCanvas.width, cursorsCanvas.height);
-            
             const now = Date.now();
-            this.remoteCursors.forEach((cursor, userId) => {
-                if (now - cursor.lastUpdate > 2000) {
+
+            this.remoteCursors.forEach((c, userId) => {
+                // Drop inactive cursors after 4 seconds
+                if (now - c.lastSeen > 4000) {
                     this.remoteCursors.delete(userId);
                     return;
                 }
-                
-                ctx.save();
-                ctx.fillStyle = cursor.color;
-                ctx.beginPath();
-                ctx.arc(cursor.x, cursor.y, 5, 0, Math.PI * 2);
-                ctx.fill();
-                
-                ctx.fillStyle = '#000';
-                ctx.font = '12px Arial';
-                ctx.fillText(`User ${userId}`, cursor.x + 10, cursor.y - 10);
-                ctx.restore();
+
+                const px = c.x * rect.width;
+                const py = c.y * rect.height;
+
+                this.drawRemoteCursor(px, py, c.userName, c.color);
             });
-            
-            requestAnimationFrame(animate);
+
+            this.cursorAnimationId = requestAnimationFrame(render);
         };
-        
-        animate();
+
+        this.cursorAnimationId = requestAnimationFrame(render);
     }
 
-    startPerformanceMonitoring() {
-        setInterval(() => {
-            const now = Date.now();
-            const delta = now - this.lastFrameTime;
-            this.fps = Math.round(1000 / delta);
-            this.lastFrameTime = now;
-            
-            const fpsCounter = document.getElementById('fps-counter');
-            if (fpsCounter) fpsCounter.textContent = `${this.fps} FPS`;
-        }, 1000);
+    drawRemoteCursor(x, y, name, color) {
+        const ctx = this.overlayCtx;
+        ctx.save();
+
+        // Draw cursor pointer arrow
+        ctx.fillStyle = color;
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x, y + 15);
+        ctx.lineTo(x + 4, y + 11);
+        ctx.lineTo(x + 9, y + 16);
+        ctx.lineTo(x + 12, y + 13);
+        ctx.lineTo(x + 7, y + 9);
+        ctx.lineTo(x + 12, y + 9);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        // Draw user name label tag
+        ctx.font = '11px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+        const textMetrics = ctx.measureText(name);
+        const tagWidth = textMetrics.width + 12;
+        const tagHeight = 18;
+        const tagX = x + 14;
+        const tagY = y + 12;
+
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(tagX, tagY, tagWidth, tagHeight, 4);
+        ctx.fill();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(name, tagX + 6, tagY + 13);
+
+        ctx.restore();
     }
 
-    showNotification(message, color) {
-        const notification = document.createElement('div');
-        notification.className = 'notification';
-        notification.style.borderLeft = `4px solid ${color}`;
-        notification.textContent = message;
-        
-        document.body.appendChild(notification);
-        
+    exportCanvasImage() {
+        const main = document.getElementById('canvas');
+        if (!main) return;
+
+        // Render clean composition on white background
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = main.width;
+        exportCanvas.height = main.height;
+        const expCtx = exportCanvas.getContext('2d');
+
+        // Fill background white
+        expCtx.fillStyle = '#ffffff';
+        expCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+        // Draw active drawing layer
+        expCtx.drawImage(main, 0, 0);
+
+        const dataUrl = exportCanvas.toDataURL('image/png');
+        const link = document.createElement('a');
+        link.download = `collaborative-canvas-${this.roomId}-${Date.now()}.png`;
+        link.href = dataUrl;
+        link.click();
+
+        this.showToast('Drawing exported as PNG!', 'success');
+    }
+
+    showToast(message, type = 'info', accentColor = null) {
+        const container = document.getElementById('toast-container');
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        if (accentColor) {
+            toast.style.borderLeftColor = accentColor;
+        }
+        toast.textContent = message;
+
+        container.appendChild(toast);
+
         setTimeout(() => {
-            notification.style.opacity = '0';
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
-                }
-            }, 300);
-        }, 3000);
+            toast.classList.add('fade-out');
+            setTimeout(() => toast.remove(), 300);
+        }, 3200);
     }
 }
 
-// Initialize app
-new CollaborativeCanvas();
-
-
-
-
+// Instantiate application on page load
+window.app = new CollaborativeApp();

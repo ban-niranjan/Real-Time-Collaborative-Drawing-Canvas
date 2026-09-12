@@ -1,221 +1,174 @@
-console.log('✅ websocket.js loaded');
+/**
+ * Robust Socket.IO Client Wrapper
+ * Handles room joining, state synchronization, point batching,
+ * cursor throttling, and automatic reconnection recovery.
+ */
 
-class WebSocketManager {
+class SocketClient {
     constructor() {
-        this.ws = null;
-        this.clientId = null;
-        this.clientColor = null;
+        this.socket = null;
+        this.roomId = null;
+        this.currentUser = null;
         this.connected = false;
-        this.reconnectAttempts = 0; 
-        this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 1000;
-         
-        this.messageQueue = []; 
-        this.batchInterval = 16;
-        this.isBatching = false;
-        
+
+        // Throttling timers
+        this.lastCursorTime = 0;
+        this.cursorThrottleMs = 35;
+
+        // Callback hooks
         this.onInit = null;
-        this.onDraw = null;
-        this.onUndo = null;
-        this.onRedo = null;
-        this.onClear = null;
-        this.onCursor = null;
         this.onUserJoined = null;
         this.onUserLeft = null;
+        this.onStrokeChunk = null;
+        this.onStrokeCommitted = null;
+        this.onActionUndone = null;
+        this.onActionRedone = null;
+        this.onActionCleared = null;
+        this.onCursorUpdate = null;
+        this.onCursorRemove = null;
         this.onConnectionChange = null;
     }
 
-    connect() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}`;
-        
-        try {
-            this.ws = new WebSocket(wsUrl);
-            this.setupEventHandlers();
-        } catch (error) {
-            console.error('WebSocket connection error:', error);
-            this.handleReconnect();
+    connect(roomId, userName = null) {
+        this.roomId = roomId;
+        this.savedUserName = userName;
+
+        if (this.onConnectionChange) {
+            this.onConnectionChange('connecting');
         }
+
+        // Initialize Socket.IO connection
+        this.socket = io({
+            transports: ['websocket', 'polling'],
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000
+        });
+
+        this.setupEventHandlers();
     }
 
     setupEventHandlers() {
-        this.ws.onopen = () => {
-            console.log('WebSocket connected');
+        const s = this.socket;
+
+        s.on('connect', () => {
+            console.log('[Socket] Connected with ID:', s.id);
             this.connected = true;
-            this.reconnectAttempts = 0;
-            
+
             if (this.onConnectionChange) {
-                this.onConnectionChange(true);
+                this.onConnectionChange('connected');
             }
-        };
 
-        this.ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                this.handleMessage(data);
-            } catch (error) {
-                console.error('Error parsing message:', error);
-            }
-        };
-
-        this.ws.onclose = () => {
-            console.log('WebSocket disconnected');
-            this.connected = false;
-            
-            if (this.onConnectionChange) {
-                this.onConnectionChange(false);
-            }
-            
-            this.handleReconnect();
-        };
-
-        this.ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-        };
-    }
-
-    handleMessage(data) {
-        switch(data.type) {
-            case 'init':
-                this.clientId = data.clientId;
-                this.clientColor = data.color;
-                if (this.onInit) {
-                    this.onInit(data);
-                }
-                break;
-
-            case 'draw':
-                if (this.onDraw) {
-                    this.onDraw(data);
-                }
-                break;
-
-            case 'undo':
-                if (this.onUndo) {
-                    this.onUndo(data);
-                }
-                break;
-
-            case 'redo':
-                if (this.onRedo) {
-                    this.onRedo(data);
-                }
-                break;
-
-            case 'clear':
-                if (this.onClear) {
-                    this.onClear(data);
-                }
-                break;
-
-            case 'cursor':
-                if (this.onCursor) {
-                    this.onCursor(data);
-                }
-                break;
-
-            case 'user-joined':
-                if (this.onUserJoined) {
-                    this.onUserJoined(data);
-                }
-                break;
-
-            case 'user-left':
-                if (this.onUserLeft) {
-                    this.onUserLeft(data);
-                }
-                break;
-
-            default:
-                console.log('Unknown message type:', data.type);
-        }
-    }
-
-    handleReconnect() {
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('Max reconnection attempts reached');
-            return;
-        }
-
-        this.reconnectAttempts++;
-        const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1);
-        
-        console.log(`Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts})`);
-        
-        setTimeout(() => {
-            this.connect();
-        }, delay);
-    }
-
-    send(message) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify(message));
-        } else {
-            console.warn('WebSocket not connected, message not sent');
-        }
-    }
-
-    sendDraw(drawData) {
-        this.messageQueue.push({
-            type: 'draw',
-            ...drawData
+            // Join target room
+            s.emit('room:join', {
+                roomId: this.roomId,
+                userName: this.currentUser ? this.currentUser.name : this.savedUserName
+            });
         });
 
-        if (!this.isBatching) {
-            this.startBatching();
-        }
+        s.on('disconnect', (reason) => {
+            console.warn('[Socket] Disconnected:', reason);
+            this.connected = false;
+
+            if (this.onConnectionChange) {
+                this.onConnectionChange(reason === 'io client disconnect' ? 'disconnected' : 'reconnecting');
+            }
+        });
+
+        s.on('connect_error', (err) => {
+            console.warn('[Socket] Connection error:', err.message);
+            if (this.onConnectionChange) {
+                this.onConnectionChange('reconnecting');
+            }
+        });
+
+        s.on('room:init', (data) => {
+            console.log('[Socket] Room initialized:', data.roomId, 'User:', data.user);
+            this.currentUser = data.user;
+            if (this.onInit) this.onInit(data);
+        });
+
+        s.on('user:joined', (data) => {
+            if (this.onUserJoined) this.onUserJoined(data);
+        });
+
+        s.on('user:left', (data) => {
+            if (this.onUserLeft) this.onUserLeft(data);
+        });
+
+        s.on('stroke:chunk', (chunk) => {
+            if (this.onStrokeChunk) this.onStrokeChunk(chunk);
+        });
+
+        s.on('stroke:committed', (data) => {
+            if (this.onStrokeCommitted) this.onStrokeCommitted(data);
+        });
+
+        s.on('action:undone', (data) => {
+            if (this.onActionUndone) this.onActionUndone(data);
+        });
+
+        s.on('action:redone', (data) => {
+            if (this.onActionRedone) this.onActionRedone(data);
+        });
+
+        s.on('action:cleared', (data) => {
+            if (this.onActionCleared) this.onActionCleared(data);
+        });
+
+        s.on('cursor:update', (cursor) => {
+            if (this.onCursorUpdate) this.onCursorUpdate(cursor);
+        });
+
+        s.on('cursor:remove', (data) => {
+            if (this.onCursorRemove) this.onCursorRemove(data);
+        });
     }
 
-    startBatching() {
-        this.isBatching = true;
-        
-        const processBatch = () => {
-            if (this.messageQueue.length === 0) {
-                this.isBatching = false;
-                return;
-            }
+    /**
+     * Send in-progress stroke chunk to peers
+     */
+    sendStrokeChunk(chunk) {
+        if (!this.connected || !this.socket) return;
+        this.socket.emit('stroke:chunk', chunk);
+    }
 
-            const batch = this.messageQueue.splice(0, this.messageQueue.length);
-            batch.forEach(msg => this.send(msg));
-
-            setTimeout(processBatch, this.batchInterval);
-        };
-
-        processBatch();
+    /**
+     * Send finalized stroke for authoritative commit
+     */
+    sendStrokeCommit(strokeData) {
+        if (!this.connected || !this.socket) return;
+        this.socket.emit('stroke:commit', strokeData);
     }
 
     sendUndo() {
-        this.send({ type: 'undo' });
+        if (!this.connected || !this.socket) return;
+        this.socket.emit('action:undo');
     }
 
-    sendRedo(operation) {
-        this.send({ 
-            type: 'redo',
-            operation: operation
-        });
+    sendRedo() {
+        if (!this.connected || !this.socket) return;
+        this.socket.emit('action:redo');
     }
 
     sendClear() {
-        this.send({ type: 'clear' });
+        if (!this.connected || !this.socket) return;
+        this.socket.emit('action:clear');
     }
 
-    sendCursor(x, y) {
-        if (!this.lastCursorSent || Date.now() - this.lastCursorSent > 50) {
-            this.send({
-                type: 'cursor',
-                x: x,
-                y: y
-            });
-            this.lastCursorSent = Date.now();
+    /**
+     * Send throttled cursor position
+     */
+    sendCursor(normX, normY) {
+        if (!this.connected || !this.socket) return;
+
+        const now = Date.now();
+        if (now - this.lastCursorTime >= this.cursorThrottleMs) {
+            this.lastCursorTime = now;
+            this.socket.emit('cursor:move', { x: normX, y: normY });
         }
     }
-
-    disconnect() {
-        if (this.ws) {
-            this.ws.close();
-        }
-    }
-
 }
 
-
+window.SocketClient = SocketClient;
