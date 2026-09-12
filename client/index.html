@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Collaborative Drawing Canvas</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body> 
+    <div class="app-container">
+        <header class="header">
+            <div class="header-left">
+                <h1>🎨 Collaborative Canvas</h1>
+                <div id="connection-status" class="status disconnected">Connecting...</div> 
+            </div>
+            <div class="header-right">
+                <div class="user-info">
+                    <span id="user-color" class="user-color"></span>
+                    <span id="user-id">Connecting...</span>
+                </div>
+                <div class="performance">
+                    <span id="fps-counter">0 FPS</span>
+                </div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <div class="tools-section">
+                    <h3>Tools</h3>
+                    <div class="tools-grid">
+                        <button class="tool-btn active" data-tool="brush" title="Brush (B)">
+                            🖌️ Brush
+                        </button>
+                        <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
+                            🧹 Eraser
+                        </button>
+                    </div>
+                </div>
+
+                <div class="color-section">
+                    <h3>Color</h3>
+                    <input type="color" id="color-picker" value="#000000">
+                    <div class="color-presets">
+                        <button class="color-preset" style="background: #000000" data-color="#000000"></button>
+                        <button class="color-preset" style="background: #FF0000" data-color="#FF0000"></button>
+                        <button class="color-preset" style="background: #00FF00" data-color="#00FF00"></button>
+                        <button class="color-preset" style="background: #0000FF" data-color="#0000FF"></button>
+                        <button class="color-preset" style="background: #FFFF00" data-color="#FFFF00"></button>
+                        <button class="color-preset" style="background: #FF00FF" data-color="#FF00FF"></button>
+                        <button class="color-preset" style="background: #00FFFF" data-color="#00FFFF"></button>
+                        <button class="color-preset" style="background: #FFFFFF; border: 1px solid #ddd" data-color="#FFFFFF"></button>
+                    </div>
+                </div>
+
+                <div class="size-section">
+                    <h3>Brush Size: <span id="brush-size-value">3</span>px</h3>
+                    <input type="range" id="brush-size" min="1" max="50" value="3">
+                </div>
+
+                <div class="actions-section">
+                    <h3>Actions</h3>
+                    <button id="undo-btn" class="action-btn" disabled title="Undo (Ctrl+Z)">
+                        ↶ Undo
+                    </button>
+                    <button id="redo-btn" class="action-btn" disabled title="Redo (Ctrl+Y)">
+                        ↷ Redo
+                    </button>
+                    <button id="clear-btn" class="action-btn danger">
+                        🗑️ Clear All
+                    </button>
+                </div>
+
+                <div class="users-section">
+                    <h3>Online Users (<span id="users-count">0</span>)</h3>
+                    <div id="users-list" class="users-list">
+                        <!-- Users will be populated here -->
+                    </div>
+                </div>
+            </aside>
+
+            <main class="canvas-container">
+                <div class="canvas-wrapper">
+                    <canvas id="canvas"></canvas>
+                    <canvas id="cursors-canvas"></canvas>
+                </div>
+                <div class="canvas-info">
+                    <p>💡 Tips: Use mouse/touch to draw. Undo/Redo works globally across all users!</p>
+                    <p>⌨️ Shortcuts: Ctrl+Z (Undo), Ctrl+Y (Redo)</p>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script src="canvas.js"></script>
+    <script src="websocket.js"></script>
+    <script src="main.js"></script>
+    
+    <script>
+
+        document.querySelectorAll('.color-preset').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const color = e.target.dataset.color;
+                document.getElementById('color-picker').value = color;
+                document.getElementById('color-picker').dispatchEvent(new Event('input'));
+            });
+        });
+    </script>
+</body>
+
+</html>
+
+
+
+
+

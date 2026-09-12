@@ -1,0 +1,17 @@
+{
+  "name": "collaborative-drawing-canvas",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "description": "Real-time collaborative drawing application",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
