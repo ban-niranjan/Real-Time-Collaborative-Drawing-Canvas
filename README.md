@@ -1,6 +1,6 @@
 # CanvasFlow Studio — Real-Time Collaborative Drawing Canvas
 
-A high-performance, real-time collaborative drawing canvas built with **Vanilla JavaScript (ES6+)**, **HTML5 Canvas**, **Node.js**, **Express**, and **Socket.IO**. Designed with zero third-party UI or drawing frameworks, this project demonstrates production-grade real-time systems engineering, multi-room isolation, server-authoritative global undo/redo, ordered conflict resolution, sub-pixel quadratic Bezier smoothing, and high-DPI rendering.
+A high-performance, real-time collaborative drawing canvas built with **Vanilla JavaScript (ES6+)**, **HTML5 Canvas**, **Node.js**, **Express**, and **Socket.IO**. Designed with zero third-party UI or drawing frameworks, this project demonstrates multi-room isolation, server-authoritative global undo/redo, ordered conflict resolution, sub-pixel quadratic Bezier smoothing, and high-DPI rendering.
 
 ---
 
@@ -30,7 +30,7 @@ Unlike naive drawing apps that stream heavy raster images or send uncoordinated 
 
 ## Key Features
 
-- **Multi-Room Isolation**: Rooms are isolated via URL query (`?room=design-critique`) or path (`/room/design-critique`). Room history, online rosters, and live cursors remain strictly confidential to that room.
+- **Multi-Room Isolation**: Rooms are isolated via URL query (`?room=design-critique`) or path (`/room/design-critique`). Room history, online rosters, and live cursors are isolated from other rooms.
 - **Incremental Live Streaming**: Remote peers see strokes rendered smoothly *while* the author is drawing, avoiding delayed "pop-in" of finished strokes.
 - **Server-Authoritative Global Undo/Redo**: Undo removes the most recent active stroke in the room regardless of author, ensuring canvas convergence across all participants.
 - **Conflict Resolution**: Monotonically increasing room sequence numbers determine authoritative z-index rendering without complex CRDT/OT overhead.
@@ -237,58 +237,13 @@ Global undo/redo operates strictly via **server-authoritative operation history*
 - **Mobile Browsers**: Chrome for Android, Mobile Safari (Touch drawing with `touch-action: none`)
 
 ---
+## Live Demo
 
-## Deployment Instructions
+**Demo:** https://real-time-collaborative-drawing-canvas-0kys.onrender.com
 
-CanvasFlow Studio is packaged with production-ready defaults:
+## Repository
 
-### Option A: Render.com (Recommended Free Tier)
-1. Push this repository to GitHub.
-2. Go to [Render Dashboard](https://dashboard.render.com/) and click **New + Web Service**.
-3. Connect your GitHub repository.
-4. Set the following build and run configurations:
-   - **Environment**: `Node`
-   - **Build Command**: `npm install`
-   - **Start Command**: `npm start`
-5. Click **Create Web Service**. Render provides an HTTPS/WSS URL automatically.
-
-### Option B: Railway.app
-1. Click **New Project** → **Deploy from GitHub repo**.
-2. Railway auto-detects Node.js and executes `npm start`.
-3. Set environment variable `PORT=3000` (or leave default assigned).
-
-### Option C: Ubuntu / Linux VPS with PM2 & NGINX
-1. Install Node.js:
-   ```bash
-   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-   sudo apt-get install -y nodejs
-   ```
-2. Clone repository and install dependencies:
-   ```bash
-   git clone <YOUR_REPO_URL> /var/www/collaborative-canvas
-   cd /var/www/collaborative-canvas
-   npm install --production
-   ```
-3. Run with PM2 process manager:
-   ```bash
-   sudo npm install -g pm2
-   pm2 start server/server.js --name "canvasflow"
-   pm2 startup
-   pm2 save
-   ```
-4. Configure NGINX reverse proxy with WebSocket upgrades (`proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection "upgrade";`).
+**GitHub:** https://github.com/ban-niranjan/Real-Time-Collaborative-Drawing-Canvas
 
 ---
 
-## Time Spent Breakdown
-
-| Phase | Description | Time Invested |
-|---|---|---|
-| **Codebase Audit** | Deep analysis of original implementation, identifying micro-segment flaws and stub files | 45 mins |
-| **Server Architecture** | Implemented Socket.IO room manager, DrawingState validation, and sequence engine | 1.5 hours |
-| **Canvas Engine** | Developed DPR scaling, quadratic curve smoothing, unified PointerEvents, destination-out eraser | 2.0 hours |
-| **Global Undo/Redo** | Built server-authoritative history branching, monotonic sequence ordering, and sync | 1.0 hour |
-| **UI & Experience** | Designed modern slate studio interface, live cursors overlay, toolbars, and toasts | 1.5 hours |
-| **Testing & Verification** | Built automated E2E test suite (`tests/collaboration.test.js`) and cross-browser checks | 1.0 hour |
-| **Technical Documentation**| Authored comprehensive `README.md` and in-depth `ARCHITECTURE.md` | 1.0 hour |
-| **Total Effort** | | **8.25 hours** |
